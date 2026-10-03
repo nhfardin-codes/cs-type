@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSType</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: #0f172a; /* Slate 900 */
+            color: #94a3b8; /* Slate 400 */
+        }
+        
+        #text-container {
+            font-size: 1.75rem;
+            line-height: 2.5rem;
+            position: relative;
+        }
+
+        .letter {
+            position: relative;
+            transition: color 0.1s ease;
+        }
+
+        .letter.correct { color: #22c55e; } /* Green 500 */
+        .letter.incorrect { 
+            color: #ef4444; /* Red 500 */
+            background-color: rgba(239, 68, 68, 0.2);
+            border-radius: 2px;
+        }
+
+        /* The Typing.com style cursor */
+        #cursor {
+            position: absolute;
+            width: 2px;
+            height: 2rem;
+            background-color: #38bdf8; /* Sky 400 */
+            transition: left 0.05s ease, top 0.05s ease;
+            animation: blink 1s infinite;
+            z-index: -1;
+        }
+
+        .cursor-active {
+            color: #e2e8f0 !important; /* Brighter text for the current letter */
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-6">
+
+    <!-- App Name -->
+    <h1 class="w-full max-w-4xl text-3xl font-bold text-white mb-6 text-left tracking-wider">CSType</h1>
+
+    <!-- Header Stats -->
+    <div class="w-full max-w-4xl flex justify-between items-center mb-8 text-xl font-bold border-b border-slate-700 pb-4">
+        <div class="flex gap-8">
+            <div class="text-sky-400">WPM: <span id="wpm">0</span></div>
+            <div class="text-emerald-400">ACC: <span id="acc">100</span>%</div>
+        </div>
+        <div class="text-amber-400">TIME: <span id="time">60</span>s</div>
+    </div>
+
+    <!-- Typing Area -->
+    <div class="w-full max-w-4xl bg-slate-800 p-8 rounded-xl shadow-2xl relative">
+        <!-- Interactive overlay to ensure focus -->
+        <div id="focus-overlay" class="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/80 rounded-xl cursor-pointer backdrop-blur-sm transition-opacity">
+            <span class="text-sky-400 animate-pulse">Click or press any key to start typing</span>
+        </div>
+        
+        <div id="text-container" class="select-none flex flex-wrap relative">
+            <div id="cursor"></div>
+            <!-- Letters will be injected here -->
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <button id="restart-btn" class="mt-8 px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors flex items-center gap-2 outline-none focus:ring-2 focus:ring-sky-400">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        Restart Test (Esc)
+    </button>
+
+    <!-- Results Modal -->
+    <div id="modal" class="fixed inset-0 bg-black/80 hidden items-center justify-center z-50">
+        <div class="bg-slate-800 p-10 rounded-2xl text-center max-w-md w-full border border-slate-700 shadow-2xl">
+            <h2 class="text-3xl font-bold text-white mb-6">Time's Up!</h2>
+            <div class="grid grid-cols-2 gap-4 mb-8">
+                <div class="bg-slate-700 p-4 rounded-xl">
+                    <div class="text-sm text-slate-400 mb-1">Final WPM</div>
+                    <div id="final-wpm" class="text-4xl font-bold text-sky-400">0</div>
+                </div>
+                <div class="bg-slate-700 p-4 rounded-xl">
+                    <div class="text-sm text-slate-400 mb-1">Accuracy</div>
+                    <div id="final-acc" class="text-4xl font-bold text-emerald-400">100%</div>
+                </div>
+            </div>
+            <button id="modal-restart" class="w-full py-4 bg-sky-500 hover:bg-sky-400 text-white font-bold rounded-xl transition-colors">
+                Try Again
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- Sound Engine (Tone.js) ---
+        let audioContextStarted = false;
+        
+        // Mechanical click for correct keystrokes
+        const clickSynth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "square" },
+            envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.01 }
+        }).toDestination();
+        clickSynth.volume.value = -15;
+
+        // Heavy "thock/clack" for errors and early spacebars
+        const errorSynth = new Tone.MembraneSynth({
+            pitchDecay: 0.01,
+            octaves: 2,
+            oscillator: { type: "square" },
+            envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 }
+        }).toDestination();
+        errorSynth.volume.value = -5;
+
+        // --- Typing Engine Variables ---
+        const textPool = [
+            "the quick brown fox jumps over the lazy dog and then runs away",
+            "technology is best when it brings people together instead of apart",
+            "always write your code as if the person who ends up maintaining it will be a violent psychopath who knows where you live",
+            "it is not a bug it is an undocumented feature that we added yesterday",
+            "mechanical keyboards offer a tactile feedback that membrane boards cannot match in typing speed and accuracy tests"
+        ];
+
+        let targetText = "";
+        let characters = [];
+        let currentIndex = 0;
+        let timer = 60;
+        let timeRemaining = timer;
+        let timerInterval = null;
+        let isTesting = false;
+        let totalTyped = 0;
+        let errors = 0;
+
+        // DOM Elements
+        const container = document.getElementById('text-container');
+        const cursor = document.getElementById('cursor');
+        const wpmEl = document.getElementById('wpm');
+        const accEl = document.getElementById('acc');
+        const timeEl = document.getElementById('time');
+        const overlay = document.getElementById('focus-overlay');
+        const modal = document.getElementById('modal');
+
+        function initTest() {
+            clearInterval(timerInterval);
+            isTesting = false;
+            timeRemaining = timer;
+            currentIndex = 0;
+            totalTyped = 0;
+            errors = 0;
+            
+            timeEl.innerText = timeRemaining;
+            wpmEl.innerText = "0";
+            accEl.innerText = "100";
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            overlay.classList.remove('hidden');
+
+            targetText = textPool[Math.floor(Math.random() * textPool.length)];
+            container.innerHTML = '<div id="cursor"></div>';
+            
+            characters = targetText.split('').map((char, index) => {
+                const span = document.createElement('span');
+                span.innerText = char;
+                span.className = 'letter';
+                if (char === ' ') span.innerHTML = '&nbsp;'; 
+                container.appendChild(span);
+                return span;
+            });
+
+            container.appendChild(document.getElementById('cursor') || createCursor());
+            updateCursorPosition();
+        }
+
+        function createCursor() {
+            const c = document.createElement('div');
+            c.id = 'cursor';
+            return c;
+        }
+
+        function updateCursorPosition() {
+            if (currentIndex >= characters.length) return;
+            
+            characters.forEach(c => c.classList.remove('cursor-active'));
+            
+            const currentLetter = characters[currentIndex];
+            currentLetter.classList.add('cursor-active');
+
+            const rect = currentLetter.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            
+            const cursorEl = document.getElementById('cursor');
+            cursorEl.style.left = `${rect.left - containerRect.left}px`;
+            cursorEl.style.top = `${rect.top - containerRect.top + 5}px`;
+        }
+
+        function startTimer() {
+            if (isTesting) return;
+            isTesting = true;
+            overlay.classList.add('hidden');
+            
+            if (!audioContextStarted) {
+                Tone.start();
+                audioContextStarted = true;
+            }
+
+            timerInterval = setInterval(() => {
+                timeRemaining--;
+                timeEl.innerText = timeRemaining;
+                updateStats();
+
+                if (timeRemaining <= 0 || currentIndex >= characters.length) {
+                    endTest();
+                }
+            }, 1000);
+        }
+
+        function updateStats() {
+            const timeElapsed = timer - timeRemaining;
+            if (timeElapsed === 0) return;
+
+            const words = totalTyped / 5;
+            const minutes = timeElapsed / 60;
+            const wpm = Math.max(0, Math.round(words / minutes));
+            
+            const accuracy = totalTyped === 0 ? 100 : Math.round(((totalTyped - errors) / totalTyped) * 100);
+
+            wpmEl.innerText = wpm;
+            accEl.innerText = accuracy;
+        }
+
+        function endTest() {
+            clearInterval(timerInterval);
+            isTesting = false;
+            
+            document.getElementById('final-wpm').innerText = wpmEl.innerText;
+            document.getElementById('final-acc').innerText = accEl.innerText + '%';
+            
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (modal.classList.contains('flex')) return; 
+
+            if (!isTesting && e.key.length === 1) {
+                startTimer();
+            }
+
+            if (e.key === 'Escape') {
+                initTest();
+                return;
+            }
+
+            if (e.key === 'Backspace') {
+                if (currentIndex > 0) {
+                    currentIndex--;
+                    characters[currentIndex].classList.remove('correct', 'incorrect');
+                    updateCursorPosition();
+                    clickSynth.triggerAttackRelease("C3", "32n"); 
+                }
+                return;
+            }
+
+            if (e.key.length !== 1) return;
+
+            e.preventDefault(); 
+            totalTyped++;
+
+            const expectedChar = targetText[currentIndex];
+
+            if (e.key === expectedChar) {
+                characters[currentIndex].classList.add('correct');
+                clickSynth.triggerAttackRelease(["C5", "E5"], "32n");
+                currentIndex++;
+            } else {
+                errors++;
+                characters[currentIndex].classList.add('incorrect');
+                errorSynth.triggerAttackRelease("C2", "8n");
+                
+                if (e.key === ' ' && expectedChar !== ' ') {
+                    while (currentIndex < characters.length && targetText[currentIndex] !== ' ') {
+                        characters[currentIndex].classList.add('incorrect');
+                        currentIndex++;
+                    }
+                    if (currentIndex < characters.length) currentIndex++; 
+                } else {
+                    currentIndex++; 
+                }
+            }
+
+            updateCursorPosition();
+            updateStats();
+
+            if (currentIndex >= characters.length) {
+                endTest();
+            }
+        });
+
+        document.getElementById('restart-btn').addEventListener('click', initTest);
+        document.getElementById('modal-restart').addEventListener('click', initTest);
+        overlay.addEventListener('click', startTimer);
+
+        window.onload = initTest;
+    </script>
+</body>
+</html>
