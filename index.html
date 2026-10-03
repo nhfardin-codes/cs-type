@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CSType</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
         
@@ -64,6 +63,7 @@
         <div class="flex gap-8">
             <div class="text-sky-400">WPM: <span id="wpm">0</span></div>
             <div class="text-emerald-400">ACC: <span id="acc">100</span>%</div>
+            <div class="text-fuchsia-400">BEST: <span id="best-wpm">0</span></div>
         </div>
         <div class="text-amber-400">TIME: <span id="time">60</span>s</div>
     </div>
@@ -108,32 +108,18 @@
     </div>
 
     <script>
-        // --- Sound Engine (Tone.js) ---
-        let audioContextStarted = false;
-        
-        // Mechanical click for correct keystrokes
-        const clickSynth = new Tone.PolySynth(Tone.Synth, {
-            oscillator: { type: "square" },
-            envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.01 }
-        }).toDestination();
-        clickSynth.volume.value = -15;
-
-        // Heavy "thock/clack" for errors and early spacebars
-        const errorSynth = new Tone.MembraneSynth({
-            pitchDecay: 0.01,
-            octaves: 2,
-            oscillator: { type: "square" },
-            envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 }
-        }).toDestination();
-        errorSynth.volume.value = -5;
+        // --- Audio Engine (Using your custom Click.mp3) ---
+        const typeSound = new Audio('Click.mp3');
+        const errorSound = new Audio('error.mp3'); // Falls back if error.mp3 exists, otherwise silent
 
         // --- Typing Engine Variables ---
         const textPool = [
-            "the quick brown fox jumps over the lazy dog and then runs away",
-            "technology is best when it brings people together instead of apart",
-            "always write your code as if the person who ends up maintaining it will be a violent psychopath who knows where you live",
-            "it is not a bug it is an undocumented feature that we added yesterday",
-            "mechanical keyboards offer a tactile feedback that membrane boards cannot match in typing speed and accuracy tests"
+            "sudo apt-get update && sudo apt-get upgrade",
+            "#include <stdio.h> int main() { printf(\"Hello World\"); return 0; }",
+            "cd ~/Desktop/projects && gcc main.c -o output && ./output",
+            "the transmission control protocol ensures reliable data delivery across computer networks",
+            "a mutex lock prevents race conditions when multiple threads access shared memory in an operating system",
+            "mechanical keyboards with tactile switches are preferred for long coding sessions"
         ];
 
         let targetText = "";
@@ -156,6 +142,10 @@
         const modal = document.getElementById('modal');
 
         function initTest() {
+            // Load High Score
+            const savedBest = localStorage.getItem('csTypeBestWPM') || 0;
+            document.getElementById('best-wpm').innerText = savedBest;
+
             clearInterval(timerInterval);
             isTesting = false;
             timeRemaining = timer;
@@ -212,11 +202,6 @@
             if (isTesting) return;
             isTesting = true;
             overlay.classList.add('hidden');
-            
-            if (!audioContextStarted) {
-                Tone.start();
-                audioContextStarted = true;
-            }
 
             timerInterval = setInterval(() => {
                 timeRemaining--;
@@ -247,6 +232,14 @@
             clearInterval(timerInterval);
             isTesting = false;
             
+            // Save High Score
+            const currentWPM = parseInt(wpmEl.innerText);
+            const savedBest = parseInt(localStorage.getItem('csTypeBestWPM')) || 0;
+            if (currentWPM > savedBest) {
+                localStorage.setItem('csTypeBestWPM', currentWPM);
+                document.getElementById('best-wpm').innerText = currentWPM;
+            }
+
             document.getElementById('final-wpm').innerText = wpmEl.innerText;
             document.getElementById('final-acc').innerText = accEl.innerText + '%';
             
@@ -271,7 +264,10 @@
                     currentIndex--;
                     characters[currentIndex].classList.remove('correct', 'incorrect');
                     updateCursorPosition();
-                    clickSynth.triggerAttackRelease("C3", "32n"); 
+                    
+                    typeSound.currentTime = 0;
+                    typeSound.playbackRate = 0.85 + Math.random() * 0.3;
+                    typeSound.play().catch(() => {});
                 }
                 return;
             }
@@ -285,12 +281,18 @@
 
             if (e.key === expectedChar) {
                 characters[currentIndex].classList.add('correct');
-                clickSynth.triggerAttackRelease(["C5", "E5"], "32n");
+                
+                typeSound.currentTime = 0;
+                typeSound.playbackRate = 0.85 + Math.random() * 0.3; // Natural pitch variance
+                typeSound.play().catch(() => {});
+                
                 currentIndex++;
             } else {
                 errors++;
                 characters[currentIndex].classList.add('incorrect');
-                errorSynth.triggerAttackRelease("C2", "8n");
+                
+                errorSound.currentTime = 0;
+                errorSound.play().catch(() => {});
                 
                 if (e.key === ' ' && expectedChar !== ' ') {
                     while (currentIndex < characters.length && targetText[currentIndex] !== ' ') {
