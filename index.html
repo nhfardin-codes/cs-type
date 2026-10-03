@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSType</title>
+    <title>CSType - Developer Typing Engine</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
@@ -32,7 +32,7 @@
             border-radius: 2px;
         }
 
-        /* The Typing.com style cursor */
+        /* Typing.com style blinking cursor */
         #cursor {
             position: absolute;
             width: 2px;
@@ -44,7 +44,7 @@
         }
 
         .cursor-active {
-            color: #e2e8f0 !important; /* Brighter text for the current letter */
+            color: #e2e8f0 !important;
         }
 
         @keyframes blink {
@@ -70,14 +70,12 @@
 
     <!-- Typing Area -->
     <div class="w-full max-w-4xl bg-slate-800 p-8 rounded-xl shadow-2xl relative">
-        <!-- Interactive overlay to ensure focus -->
         <div id="focus-overlay" class="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/80 rounded-xl cursor-pointer backdrop-blur-sm transition-opacity">
-            <span class="text-sky-400 animate-pulse">Click or press any key to start typing</span>
+            <span class="text-sky-400 font-semibold animate-pulse">Click or press any key to start typing</span>
         </div>
         
         <div id="text-container" class="select-none flex flex-wrap relative">
             <div id="cursor"></div>
-            <!-- Letters will be injected here -->
         </div>
     </div>
 
@@ -90,7 +88,7 @@
     <!-- Results Modal -->
     <div id="modal" class="fixed inset-0 bg-black/80 hidden items-center justify-center z-50">
         <div class="bg-slate-800 p-10 rounded-2xl text-center max-w-md w-full border border-slate-700 shadow-2xl">
-            <h2 class="text-3xl font-bold text-white mb-6">Time's Up!</h2>
+            <h2 class="text-3xl font-bold text-white mb-6">Test Complete!</h2>
             <div class="grid grid-cols-2 gap-4 mb-8">
                 <div class="bg-slate-700 p-4 rounded-xl">
                     <div class="text-sm text-slate-400 mb-1">Final WPM</div>
@@ -108,11 +106,34 @@
     </div>
 
     <script>
-        // --- Audio Engine (Using your custom Click.mp3) ---
-        const typeSound = new Audio('Click.mp3');
-        const errorSound = new Audio('error.mp3'); // Falls back if error.mp3 exists, otherwise silent
+        // --- Multi-Channel Audio Engine to Prevent Overlapping Lag ---
+        const AUDIO_POOL_SIZE = 5;
+        const clickPool = [];
+        let poolIndex = 0;
 
-        // --- Typing Engine Variables ---
+        for (let i = 0; i < AUDIO_POOL_SIZE; i++) {
+            const audio = new Audio('Click.mp3');
+            audio.preload = 'auto';
+            clickPool.push(audio);
+        }
+
+        function playClickSound() {
+            const sound = clickPool[poolIndex];
+            sound.currentTime = 0;
+            sound.playbackRate = 0.85 + Math.random() * 0.3; // Natural mechanical pitch variation
+            sound.play().catch(() => {});
+            poolIndex = (poolIndex + 1) % AUDIO_POOL_SIZE;
+        }
+
+        const errorSound = new Audio('error.mp3');
+        errorSound.preload = 'auto';
+
+        function playErrorSound() {
+            errorSound.currentTime = 0;
+            errorSound.play().catch(() => {});
+        }
+
+        // --- Text & Typing Data Pool ---
         const textPool = [
             "sudo apt-get update && sudo apt-get upgrade",
             "#include <stdio.h> int main() { printf(\"Hello World\"); return 0; }",
@@ -142,7 +163,6 @@
         const modal = document.getElementById('modal');
 
         function initTest() {
-            // Load High Score
             const savedBest = localStorage.getItem('csTypeBestWPM') || 0;
             document.getElementById('best-wpm').innerText = savedBest;
 
@@ -163,7 +183,7 @@
             targetText = textPool[Math.floor(Math.random() * textPool.length)];
             container.innerHTML = '<div id="cursor"></div>';
             
-            characters = targetText.split('').map((char, index) => {
+            characters = targetText.split('').map((char) => {
                 const span = document.createElement('span');
                 span.innerText = char;
                 span.className = 'letter';
@@ -221,7 +241,6 @@
             const words = totalTyped / 5;
             const minutes = timeElapsed / 60;
             const wpm = Math.max(0, Math.round(words / minutes));
-            
             const accuracy = totalTyped === 0 ? 100 : Math.round(((totalTyped - errors) / totalTyped) * 100);
 
             wpmEl.innerText = wpm;
@@ -232,7 +251,6 @@
             clearInterval(timerInterval);
             isTesting = false;
             
-            // Save High Score
             const currentWPM = parseInt(wpmEl.innerText);
             const savedBest = parseInt(localStorage.getItem('csTypeBestWPM')) || 0;
             if (currentWPM > savedBest) {
@@ -264,10 +282,7 @@
                     currentIndex--;
                     characters[currentIndex].classList.remove('correct', 'incorrect');
                     updateCursorPosition();
-                    
-                    typeSound.currentTime = 0;
-                    typeSound.playbackRate = 0.85 + Math.random() * 0.3;
-                    typeSound.play().catch(() => {});
+                    playClickSound();
                 }
                 return;
             }
@@ -281,18 +296,12 @@
 
             if (e.key === expectedChar) {
                 characters[currentIndex].classList.add('correct');
-                
-                typeSound.currentTime = 0;
-                typeSound.playbackRate = 0.85 + Math.random() * 0.3; // Natural pitch variance
-                typeSound.play().catch(() => {});
-                
+                playClickSound();
                 currentIndex++;
             } else {
                 errors++;
                 characters[currentIndex].classList.add('incorrect');
-                
-                errorSound.currentTime = 0;
-                errorSound.play().catch(() => {});
+                playErrorSound();
                 
                 if (e.key === ' ' && expectedChar !== ' ') {
                     while (currentIndex < characters.length && targetText[currentIndex] !== ' ') {
